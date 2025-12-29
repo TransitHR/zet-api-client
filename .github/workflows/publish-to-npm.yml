@@ -63,4 +63,4 @@ jobs:
       - name: Publish to npm using OIDC
         if: env.publish == 'true'
         run: |
-          npm publish --provenance
+          npm publish --provenance --access public
