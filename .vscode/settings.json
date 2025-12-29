@@ -1,0 +1,18 @@
+{
+	"typescript.preferences.importModuleSpecifier": "non-relative",
+	"javascript.preferences.importModuleSpecifier": "non-relative",
+	"editor.tabSize": 4,
+	"editor.formatOnSave": true,
+	"editor.insertSpaces": false,
+	"files.insertFinalNewline": true,
+	"editor.codeActionsOnSave": {
+		"source.fixAll": "explicit",
+		"source.organizeImports": "never"
+	},
+	"eslint.validate": [
+		"typescript",
+		"javascript",
+		"typescriptreact",
+		"javascriptreact"
+	],
+}

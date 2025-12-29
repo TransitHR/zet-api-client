@@ -1,0 +1,4 @@
+dist
+gfts
+node_modules
+src/test.ts
