@@ -1,8 +1,8 @@
-import { Route, Stop, News, Shape, RoutesResponseSchema, RouteTripsResponseSchema, StopsResponseSchema, TripStopTimesResponseSchema, NewsfeedResponseSchema, ShapesResponseSchema, GetRoutesInput, GetRouteTripsInput, GetStopsInput, GetTripStopTimesInput, SearchRoutesInput, SearchStopsInput, TripWithDates, TripStopTimeWithDates, NewsWithDates, GTFSRTVehiclePosition } from './parsers';
+import { Route, Stop, News, Shape, RoutesResponseSchema, RouteTripsResponseSchema, StopsResponseSchema, TripStopTimesResponseSchema, NewsfeedResponseSchema, ShapesResponseSchema, GetRoutesInput, GetRouteTripsInput, GetStopsInput, GetTripStopTimesInput, SearchRoutesInput, SearchStopsInput, TripWithDates, TripStopTimeWithDates, NewsWithDates, GTFSRTVehiclePosition, PlatformDirection, StopDirectionMap, GetPlatformDirectionsInput } from './parsers';
 import { StopIncomingTripsResponseSchema, GetStopIncomingTripsInput, StopIncomingTripWithDates, AccountSchema, Account } from '../auth/types';
 import { parseZodError, normalizeString, parseGtfsRtVehicles } from './utils';
+import { RouteTypeEnum, DirectionEnum } from './constants';
 import { ZetAuthManager } from '../auth/manager';
-import { RouteTypeEnum } from './constants';
 import config, { headers } from './config';
 import axios, { AxiosError } from 'axios';
 
@@ -300,6 +300,87 @@ export class ZetManager {
 		const shapes = await this.getShapes();
 
 		return shapes.filter((shape) => uniqueShapeIds.has(shape.id));
+	}
+
+	// Platform Directions.
+	public async getPlatformDirections(options: GetPlatformDirectionsInput): Promise<StopDirectionMap> {
+		const directionsMap = new Map<string, PlatformDirection>();
+
+		let stops = options.stops;
+		if (!stops) {
+			stops = await this.getStops();
+			if (options.parentStopId) stops = stops.filter((stop) => stop.parentStopId === options.parentStopId || stop.id === options.parentStopId);
+		}
+
+		let trips = options.trips;
+		if (!trips && options.routeId) trips = await this.getRouteTrips({ routeId: options.routeId, daysFromToday: 0 });
+		if (!trips) throw new Error('Either provide trips data or specify a routeId to fetch trips.');
+
+		const outboundTrips = trips.filter((trip) => trip.direction === DirectionEnum.Outbound);
+		const inboundTrips = trips.filter((trip) => trip.direction === DirectionEnum.Inbound);
+
+		for (const trip of outboundTrips) {
+			try {
+				const stopTimes = await this.getTripStopTimes({ tripId: trip.id });
+				for (const stopTime of stopTimes) {
+					const stop = stops.find((s) => s.id === stopTime.id);
+					if (stop && !directionsMap.has(stopTime.id)) {
+						const routeIds = stop.trips.map((t) => parseInt(t.routeCode)).filter((id) => !isNaN(id));
+						directionsMap.set(stopTime.id, {
+							stopId: stopTime.id,
+							parentStopId: stop.parentStopId,
+							projectNo: stop.projectNo,
+							direction: DirectionEnum.Outbound,
+							headsign: trip.headsign,
+							routeIds,
+							position: {
+								lat: stop.stopLat,
+								lng: stop.stopLong,
+							},
+						});
+					}
+				}
+			} catch (error) {
+				continue;
+			}
+		}
+
+		for (const trip of inboundTrips) {
+			try {
+				const stopTimes = await this.getTripStopTimes({ tripId: trip.id });
+				for (const stopTime of stopTimes) {
+					const stop = stops.find((s) => s.id === stopTime.id);
+					if (stop && !directionsMap.has(stopTime.id)) {
+						const routeIds = stop.trips.map((t) => parseInt(t.routeCode)).filter((id) => !isNaN(id));
+						directionsMap.set(stopTime.id, {
+							stopId: stopTime.id,
+							parentStopId: stop.parentStopId,
+							projectNo: stop.projectNo,
+							direction: DirectionEnum.Inbound,
+							headsign: trip.headsign,
+							routeIds,
+							position: {
+								lat: stop.stopLat,
+								lng: stop.stopLong,
+							},
+						});
+					}
+				}
+			} catch (error) {
+				continue;
+			}
+		}
+
+		return directionsMap;
+	}
+
+	public async getPlatformDirectionsForParentStop(parentStopId: string): Promise<PlatformDirection[]> {
+		const directions = await this.getPlatformDirections({ parentStopId });
+		return Array.from(directions.values()).filter((dir) => dir.parentStopId === parentStopId);
+	}
+
+	public async getPlatformDirectionsForRoute(routeId: number): Promise<StopDirectionMap> {
+		return this.getPlatformDirections({ routeId });
 	}
 
 	// Vehicles.

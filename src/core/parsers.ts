@@ -126,7 +126,7 @@ export const GetStopsInputSchema = z.object({
 export type GetTripStopTimesInput = z.infer<typeof GetTripStopTimesInputSchema>;
 export const GetTripStopTimesInputSchema = z.object({
 	tripId: z.string(),
-	daysFromToday: z.number().min(0).max(30).optional().default(0),
+	daysFromToday: z.number().min(0).max(30).optional(),
 });
 
 export type RoutesResponse = z.infer<typeof RoutesResponseSchema>;
@@ -144,21 +144,34 @@ export const TripStopTimesResponseSchema = z.array(TripStopTimeSchema);
 export type NewsfeedResponse = z.infer<typeof NewsfeedResponseSchema>;
 export const NewsfeedResponseSchema = z.array(NewsSchema);
 
-export type TripWithDates = Omit<Trip, 'departureDateTime' | 'arrivalDateTime'> & {
-	departureDateTime: Date;
-	arrivalDateTime: Date;
-};
+export type TripWithDates = z.infer<typeof TripWithDatesSchema>;
+export const TripWithDatesSchema = TripSchema.omit({
+	departureDateTime: true,
+	arrivalDateTime: true,
+}).extend({
+	departureDateTime: z.date(),
+	arrivalDateTime: z.date(),
+});
 
-export type TripStopTimeWithDates = Omit<TripStopTime, 'expectedArrivalDateTime' | 'trip'> & {
-	expectedArrivalDateTime: Date;
-	trip: TripWithDates;
-};
+export type TripStopTimeWithDates = z.infer<typeof TripStopTimeWithDatesSchema>;
+export const TripStopTimeWithDatesSchema = TripStopTimeSchema.omit({
+	expectedArrivalDateTime: true,
+	trip: true,
+}).extend({
+	expectedArrivalDateTime: z.date(),
+	trip: TripWithDatesSchema,
+});
 
-export type NewsWithDates = Omit<News, 'datePublished' | 'validFrom' | 'validTo'> & {
-	datePublished: Date;
-	validFrom: Date;
-	validTo: Date;
-};
+export type NewsWithDates = z.infer<typeof NewsWithDatesSchema>;
+export const NewsWithDatesSchema = NewsSchema.omit({
+	datePublished: true,
+	validFrom: true,
+	validTo: true,
+}).extend({
+	datePublished: z.date(),
+	validFrom: z.date(),
+	validTo: z.date(),
+});
 
 export type SearchRoutesInput = z.infer<typeof SearchRoutesInputSchema>;
 export const SearchRoutesInputSchema = z.object({
@@ -172,6 +185,31 @@ export const SearchStopsInputSchema = z.object({
 	query: z.string().min(1),
 	routeType: z.nativeEnum(RouteTypeEnum).optional(),
 	limit: z.number().min(1).max(100).optional().default(10),
+});
+
+export type PlatformDirection = z.infer<typeof PlatformDirectionSchema>;
+export const PlatformDirectionSchema = z.object({
+	stopId: z.string(),
+	parentStopId: z.string(),
+	projectNo: z.string(),
+	direction: z.nativeEnum(DirectionEnum),
+	headsign: z.string(),
+	routeIds: z.array(z.number()),
+	position: z.object({
+		lat: z.number(),
+		lng: z.number(),
+	}),
+});
+
+export type StopDirectionMap = Map<string, PlatformDirection>; // stopId -> PlatformDirection
+
+export type GetPlatformDirectionsInput = z.infer<typeof GetPlatformDirectionsInputSchema>;
+export const GetPlatformDirectionsInputSchema = z.object({
+	routeId: z.number().optional(),
+	parentStopId: z.string().optional(),
+	stops: z.array(StopSchema).optional(),
+	trips: z.array(TripWithDatesSchema).optional(),
+	sampleSize: z.number().min(1).max(10).optional(),
 });
 
 // GTFSRT Times.

@@ -229,6 +229,48 @@ stops.forEach((stop) => {
 });
 ```
 
+### Platform Direction Mapping
+
+```typescript
+const zet = new ZetManager();
+
+// Get platform directions for a specific route
+const routeDirections = await zet.getPlatformDirectionsForRoute(4);
+
+console.log("Route 4 Platform Directions:");
+for (const [stopId, direction] of routeDirections) {
+  console.log(
+    `${stopId} (Platform ${direction.projectNo}): ${
+      direction.direction === 0 ? "Outbound to" : "Inbound from"
+    } ${direction.headsign}`
+  );
+}
+
+// Get platform directions for a specific parent stop (e.g., "Aleja javora")
+const platforms = await zet.getPlatformDirectionsForParentStop("189");
+
+platforms.forEach((platform) => {
+  console.log(
+    `🚏 Platform ${platform.projectNo}: ${
+      platform.direction === 0 ? "Outbound to" : "Inbound from"
+    } ${platform.headsign}`
+  );
+  console.log(`   Routes: ${platform.routeIds.join(", ")}`);
+  console.log(`   GPS: ${platform.position.lat}, ${platform.position.lng}`);
+});
+
+// Use with existing data to avoid API calls
+const existingStops = await zet.getStops();
+const existingTrips = await zet.getRouteTrips({ routeId: 11 });
+
+const directions = await zet.getPlatformDirections({
+  routeId: 11,
+  stops: existingStops,
+  trips: existingTrips,
+  sampleSize: 2, // Analyze fewer trips for faster processing
+});
+```
+
 ### Service Updates
 
 ```typescript
