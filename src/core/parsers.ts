@@ -61,9 +61,6 @@ export const TripSchema = z.object({
 	shapeId: z.string(),
 });
 
-export type RouteTrip = z.infer<typeof RouteTripSchema>;
-export const RouteTripSchema = TripSchema;
-
 export type Stop = z.infer<typeof StopSchema>;
 export const StopSchema = z.object({
 	id: z.string(),
@@ -110,11 +107,11 @@ export const GetRoutesInputSchema = z.object({
 	routeType: z.nativeEnum(RouteTypeEnum).optional(),
 });
 
-export type GetRouteTripsInput = z.infer<typeof GetRouteTripsInputSchema>;
 export const GetRouteTripsInputSchema = z.object({
 	routeId: z.number(),
 	daysFromToday: z.number().min(0).max(30).optional().default(0),
 });
+export type GetRouteTripsInput = z.input<typeof GetRouteTripsInputSchema>;
 
 export type GetStopsInput = z.infer<typeof GetStopsInputSchema>;
 export const GetStopsInputSchema = z.object({
@@ -133,7 +130,7 @@ export type RoutesResponse = z.infer<typeof RoutesResponseSchema>;
 export const RoutesResponseSchema = z.array(RouteSchema);
 
 export type RouteTripsResponse = z.infer<typeof RouteTripsResponseSchema>;
-export const RouteTripsResponseSchema = z.array(RouteTripSchema);
+export const RouteTripsResponseSchema = z.array(TripSchema);
 
 export type StopsResponse = z.infer<typeof StopsResponseSchema>;
 export const StopsResponseSchema = z.array(StopSchema);
@@ -173,43 +170,18 @@ export const NewsWithDatesSchema = NewsSchema.omit({
 	validTo: z.date(),
 });
 
-export type SearchRoutesInput = z.infer<typeof SearchRoutesInputSchema>;
+export type SearchRoutesInput = z.input<typeof SearchRoutesInputSchema>;
 export const SearchRoutesInputSchema = z.object({
 	query: z.string().min(1),
 	routeType: z.nativeEnum(RouteTypeEnum).optional(),
 	limit: z.number().min(1).max(100).optional().default(10),
 });
 
-export type SearchStopsInput = z.infer<typeof SearchStopsInputSchema>;
+export type SearchStopsInput = z.input<typeof SearchStopsInputSchema>;
 export const SearchStopsInputSchema = z.object({
 	query: z.string().min(1),
 	routeType: z.nativeEnum(RouteTypeEnum).optional(),
 	limit: z.number().min(1).max(100).optional().default(10),
-});
-
-export type PlatformDirection = z.infer<typeof PlatformDirectionSchema>;
-export const PlatformDirectionSchema = z.object({
-	stopId: z.string(),
-	parentStopId: z.string(),
-	projectNo: z.string(),
-	direction: z.nativeEnum(DirectionEnum),
-	headsign: z.string(),
-	routeIds: z.array(z.number()),
-	position: z.object({
-		lat: z.number(),
-		lng: z.number(),
-	}),
-});
-
-export type StopDirectionMap = Map<string, PlatformDirection>; // stopId -> PlatformDirection
-
-export type GetPlatformDirectionsInput = z.infer<typeof GetPlatformDirectionsInputSchema>;
-export const GetPlatformDirectionsInputSchema = z.object({
-	routeId: z.number().optional(),
-	parentStopId: z.string().optional(),
-	stops: z.array(StopSchema).optional(),
-	trips: z.array(TripWithDatesSchema).optional(),
-	sampleSize: z.number().min(1).max(10).optional(),
 });
 
 // GTFSRT Times.

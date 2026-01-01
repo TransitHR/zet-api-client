@@ -6,6 +6,7 @@ export default {
 	gtfsServiceUrl: 'https://api.zet.hr/TimetableService.Api/api/gtfs',
 	newsProxyServiceUrl: 'https://api.zet.hr/NewsProxyService.Api/api/newsfeed',
 	accountServiceUrl: 'https://api.zet.hr/AccountService.Api/api/account',
+	ticketServiceUrl: 'https://api.zet.hr/TicketService.Api/api/v1/open/tickets',
 };
 
 export const headers = {

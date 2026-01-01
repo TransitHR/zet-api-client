@@ -72,10 +72,33 @@ export type StopIncomingTripWithDates = Omit<StopIncomingTrip, 'expectedArrivalD
 	expectedArrivalDateTime: Date;
 };
 
-export type GetStopIncomingTripsInput = z.infer<typeof GetStopIncomingTripsInputSchema>;
+export type GetStopIncomingTripsInput = z.input<typeof GetStopIncomingTripsInputSchema>;
 export const GetStopIncomingTripsInputSchema = z.object({
 	stopId: z.string(),
-	isMapView: z.boolean().optional().default(false),
+	isMapView: z.boolean().optional(),
 });
 
 export const StopIncomingTripsResponseSchema = z.array(StopIncomingTripSchema);
+
+export type Zone = z.infer<typeof ZoneSchema>;
+export const ZoneSchema = z.object({
+	value: z.number(),
+	caption: z.string(),
+});
+
+export type TicketArticle = z.infer<typeof TicketArticleSchema>;
+export const TicketArticleSchema = z.object({
+	articleId: z.number(),
+	articleCaption: z.string(),
+	validInZones: z.array(ZoneSchema),
+	availableInZones: z.array(ZoneSchema),
+	validOnlyInZoneOfAcquisition: z.boolean(),
+	price: z.number(),
+});
+
+export type TicketArticlesResponse = z.infer<typeof TicketArticlesResponseSchema>;
+export const TicketArticlesResponseSchema = z.object({
+	foundArticles: z.array(TicketArticleSchema),
+	foundInTheVicinityOfStationsIds: z.array(z.string()).nullable(),
+	extractedZone: ZoneSchema,
+});

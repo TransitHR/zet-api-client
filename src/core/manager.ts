@@ -1,23 +1,29 @@
-import { Route, Stop, News, Shape, RoutesResponseSchema, RouteTripsResponseSchema, StopsResponseSchema, TripStopTimesResponseSchema, NewsfeedResponseSchema, ShapesResponseSchema, GetRoutesInput, GetRouteTripsInput, GetStopsInput, GetTripStopTimesInput, SearchRoutesInput, SearchStopsInput, TripWithDates, TripStopTimeWithDates, NewsWithDates, GTFSRTVehiclePosition, PlatformDirection, StopDirectionMap, GetPlatformDirectionsInput } from './parsers';
-import { StopIncomingTripsResponseSchema, GetStopIncomingTripsInput, StopIncomingTripWithDates, AccountSchema, Account } from '../auth/types';
+import { Route, Stop, News, Shape, RoutesResponseSchema, RouteTripsResponseSchema, StopsResponseSchema, TripStopTimesResponseSchema, NewsfeedResponseSchema, ShapesResponseSchema, GetRoutesInput, GetRouteTripsInput, GetStopsInput, GetTripStopTimesInput, SearchRoutesInput, SearchStopsInput, TripWithDates, TripStopTimeWithDates, NewsWithDates, GTFSRTVehiclePosition } from './parsers';
+import { StopIncomingTripsResponseSchema, GetStopIncomingTripsInput, StopIncomingTripWithDates, AccountSchema, Account, TicketArticlesResponseSchema, TicketArticlesResponse } from '../auth/types';
 import { parseZodError, normalizeString, parseGtfsRtVehicles } from './utils';
-import { RouteTypeEnum, DirectionEnum } from './constants';
 import { ZetAuthManager } from '../auth/manager';
+import { RouteTypeEnum } from './constants';
 import config, { headers } from './config';
 import axios, { AxiosError } from 'axios';
 
 export class ZetManager {
 	private cachedRoutes: Route[] | null = null;
-	private cachedStops: Stop[] | null = null;
 	private cachedShapes: Shape[] | null = null;
+	private cachedStops: Stop[] | null = null;
 	private cachedNews: News[] | null = null;
 
 	private shapeToRouteTypeMap: Map<string, RouteTypeEnum> = new Map();
 
 	private routesCachedAt: number | null = null;
-	private stopsCachedAt: number | null = null;
 	private shapesCachedAt: number | null = null;
+	private stopsCachedAt: number | null = null;
 	private newsCachedAt: number | null = null;
+
+	// Cache loading state to prevent race conditions
+	private routesLoading: Promise<void> | null = null;
+	private stopsLoading: Promise<void> | null = null;
+	private shapesLoading: Promise<void> | null = null;
+	private newsLoading: Promise<News[]> | null = null;
 
 	public authManager = new ZetAuthManager();
 	private timeoutMs: number = 10000;
@@ -36,7 +42,14 @@ export class ZetManager {
 		const now = Date.now();
 		const needsRefresh = !this.cachedRoutes || (this.cacheTTL >= 0 && this.routesCachedAt && now - this.routesCachedAt > this.cacheTTL);
 
-		if (needsRefresh) await this.fetchAndCacheRoutes();
+		if (needsRefresh) {
+			// Prevent multiple simultaneous cache refreshes
+			if (!this.routesLoading) {
+				this.routesLoading = this.fetchAndCacheRoutes();
+			}
+			await this.routesLoading;
+			this.routesLoading = null;
+		}
 		if (!this.cachedRoutes) throw new Error('Failed to fetch routes.');
 
 		if (routeType !== undefined) return this.cachedRoutes.filter((route) => route.routeType === routeType);
@@ -114,44 +127,6 @@ export class ZetManager {
 		}));
 	}
 
-	public async getLiveTripsForRoute(routeId: number, daysFromToday: number = 0): Promise<Map<string, TripStopTimeWithDates[]>> {
-		const trips = await this.getRouteTrips({ routeId, daysFromToday });
-		const liveData = new Map<string, TripStopTimeWithDates[]>();
-
-		const now = new Date();
-		const activeTrips = trips.filter((trip) => {
-			const isActive = trip.departureDateTime <= now && trip.arrivalDateTime >= now;
-			return isActive && trip.vehicles.some((v) => v.position);
-		});
-
-		const stopTimesPromises = activeTrips.map(async (trip) => {
-			try {
-				const stopTimes = await this.getTripStopTimes({ tripId: trip.id, daysFromToday });
-				return { tripId: trip.id, stopTimes };
-			} catch (error) {
-				return { tripId: trip.id, stopTimes: [] };
-			}
-		});
-
-		const results = await Promise.all(stopTimesPromises);
-		for (const result of results) {
-			if (result.stopTimes.length > 0) {
-				liveData.set(result.tripId, result.stopTimes);
-			}
-		}
-
-		return liveData;
-	}
-
-	public async getActiveTripIds(routeId: number, daysFromToday: number = 0, tripsOverride?: TripWithDates[]): Promise<string[]> {
-		const trips = tripsOverride || await this.getRouteTrips({ routeId, daysFromToday });
-		const now = new Date();
-
-		return trips
-			.filter((trip) => trip.departureDateTime <= now && trip.arrivalDateTime >= now && trip.vehicles.some((v) => v.position))
-			.map((trip) => trip.id);
-	}
-
 	// Account,
 	public async getAccountInfo(): Promise<Account> {
 		if (!this.authManager.isAuthenticated()) throw new Error('Authentication required. Please login using getAuthManager().login() first.');
@@ -173,12 +148,41 @@ export class ZetManager {
 		return parsed.data;
 	}
 
+	// Tickets.
+	public async getTicketArticles(): Promise<TicketArticlesResponse> {
+		if (!this.authManager.isAuthenticated()) throw new Error('Authentication required. Please login using getAuthManager().login() first.');
+
+		const token = await this.authManager.getAccessToken();
+		if (!token) throw new Error('Failed to get access token. Please login again.');
+
+		const url = `${config.ticketServiceUrl}/article`;
+
+		const response = await axios.get(url, {
+			timeout: this.timeoutMs,
+			headers: {
+				...headers,
+				Authorization: `Bearer ${token}`,
+			},
+		}).catch((err: AxiosError) => err.response);
+
+		if (!response || response.status !== 200) throw new Error(`Failed to fetch ticket articles: ${response?.statusText || 'Unknown error'}`);
+		const parsed = TicketArticlesResponseSchema.safeParse(response.data);
+		if (!parsed.success) throw new Error(`Failed to parse ticket articles data: ${parseZodError(parsed.error).join(', ')}.`);
+
+		return parsed.data;
+	}
+
 	// Stops.
 	public async getStops(routeType?: RouteTypeEnum): Promise<Stop[]> {
 		const now = Date.now();
 		const needsRefresh = !this.cachedStops || (this.cacheTTL >= 0 && this.stopsCachedAt && now - this.stopsCachedAt > this.cacheTTL);
 
-		if (needsRefresh) await this.fetchAndCacheStops();
+		if (needsRefresh) {
+			if (!this.stopsLoading) this.stopsLoading = this.fetchAndCacheStops();
+			await this.stopsLoading;
+			this.stopsLoading = null;
+		}
+
 		if (!this.cachedStops) throw new Error('Failed to fetch stops.');
 
 		if (routeType !== undefined) return this.cachedStops.filter((stop) => stop.routeType === routeType);
@@ -255,16 +259,24 @@ export class ZetManager {
 		const needsRefresh = !this.cachedNews || (this.cacheTTL >= 0 && this.newsCachedAt && now - this.newsCachedAt > this.cacheTTL);
 		if (!needsRefresh && this.cachedNews) return this.cachedNews;
 
-		const url = config.newsProxyServiceUrl;
-		const response = await axios.get(url, { headers, timeout: this.timeoutMs }).catch((err: AxiosError) => err.response);
-		if (!response || response.status !== 200) throw new Error(`Failed to fetch newsfeed: ${response?.statusText || 'Unknown error'}`);
+		// Prevent multiple simultaneous cache refreshes
+		if (!this.newsLoading) {
+			this.newsLoading = (async () => {
+				const url = config.newsProxyServiceUrl;
+				const response = await axios.get(url, { headers, timeout: this.timeoutMs }).catch((err: AxiosError) => err.response);
+				if (!response || response.status !== 200) throw new Error(`Failed to fetch newsfeed: ${response?.statusText || 'Unknown error'}`);
 
-		const parsed = NewsfeedResponseSchema.safeParse(response.data);
-		if (!parsed.success) throw new Error(`Failed to parse newsfeed data: ${parseZodError(parsed.error).join(', ')}.`);
+				const parsed = NewsfeedResponseSchema.safeParse(response.data);
+				if (!parsed.success) throw new Error(`Failed to parse newsfeed data: ${parseZodError(parsed.error).join(', ')}.`);
 
-		this.cachedNews = parsed.data;
-		this.newsCachedAt = now;
-		return parsed.data;
+				this.cachedNews = parsed.data;
+				this.newsCachedAt = now;
+				return parsed.data;
+			})();
+		}
+		const result = await this.newsLoading;
+		this.newsLoading = null;
+		return result;
 	}
 
 	public async getNewsfeed(): Promise<NewsWithDates[]> {
@@ -283,14 +295,17 @@ export class ZetManager {
 	}
 
 	// Shapes.
-	public async getShapes(routeType?: RouteTypeEnum): Promise<Shape[]> {
+	public async getShapes(): Promise<Shape[]> {
 		const now = Date.now();
 		const needsRefresh = !this.cachedShapes || (this.cacheTTL >= 0 && this.shapesCachedAt && now - this.shapesCachedAt > this.cacheTTL);
 
-		if (needsRefresh) await this.fetchAndCacheShapes();
-		if (!this.cachedShapes) throw new Error('Failed to fetch shapes.');
+		if (needsRefresh) {
+			if (!this.shapesLoading) this.shapesLoading = this.fetchAndCacheShapes();
+			await this.shapesLoading;
+			this.shapesLoading = null;
+		}
 
-		if (routeType !== undefined) return this.cachedShapes.filter((shape) => this.shapeToRouteTypeMap.get(shape.id) === routeType);
+		if (!this.cachedShapes) throw new Error('Failed to fetch shapes.');
 		return this.cachedShapes;
 	}
 
@@ -300,87 +315,6 @@ export class ZetManager {
 		const shapes = await this.getShapes();
 
 		return shapes.filter((shape) => uniqueShapeIds.has(shape.id));
-	}
-
-	// Platform Directions.
-	public async getPlatformDirections(options: GetPlatformDirectionsInput): Promise<StopDirectionMap> {
-		const directionsMap = new Map<string, PlatformDirection>();
-
-		let stops = options.stops;
-		if (!stops) {
-			stops = await this.getStops();
-			if (options.parentStopId) stops = stops.filter((stop) => stop.parentStopId === options.parentStopId || stop.id === options.parentStopId);
-		}
-
-		let trips = options.trips;
-		if (!trips && options.routeId) trips = await this.getRouteTrips({ routeId: options.routeId, daysFromToday: 0 });
-		if (!trips) throw new Error('Either provide trips data or specify a routeId to fetch trips.');
-
-		const outboundTrips = trips.filter((trip) => trip.direction === DirectionEnum.Outbound);
-		const inboundTrips = trips.filter((trip) => trip.direction === DirectionEnum.Inbound);
-
-		for (const trip of outboundTrips) {
-			try {
-				const stopTimes = await this.getTripStopTimes({ tripId: trip.id });
-				for (const stopTime of stopTimes) {
-					const stop = stops.find((s) => s.id === stopTime.id);
-					if (stop && !directionsMap.has(stopTime.id)) {
-						const routeIds = stop.trips.map((t) => parseInt(t.routeCode)).filter((id) => !isNaN(id));
-						directionsMap.set(stopTime.id, {
-							stopId: stopTime.id,
-							parentStopId: stop.parentStopId,
-							projectNo: stop.projectNo,
-							direction: DirectionEnum.Outbound,
-							headsign: trip.headsign,
-							routeIds,
-							position: {
-								lat: stop.stopLat,
-								lng: stop.stopLong,
-							},
-						});
-					}
-				}
-			} catch (error) {
-				continue;
-			}
-		}
-
-		for (const trip of inboundTrips) {
-			try {
-				const stopTimes = await this.getTripStopTimes({ tripId: trip.id });
-				for (const stopTime of stopTimes) {
-					const stop = stops.find((s) => s.id === stopTime.id);
-					if (stop && !directionsMap.has(stopTime.id)) {
-						const routeIds = stop.trips.map((t) => parseInt(t.routeCode)).filter((id) => !isNaN(id));
-						directionsMap.set(stopTime.id, {
-							stopId: stopTime.id,
-							parentStopId: stop.parentStopId,
-							projectNo: stop.projectNo,
-							direction: DirectionEnum.Inbound,
-							headsign: trip.headsign,
-							routeIds,
-							position: {
-								lat: stop.stopLat,
-								lng: stop.stopLong,
-							},
-						});
-					}
-				}
-			} catch (error) {
-				continue;
-			}
-		}
-
-		return directionsMap;
-	}
-
-	public async getPlatformDirectionsForParentStop(parentStopId: string): Promise<PlatformDirection[]> {
-		const directions = await this.getPlatformDirections({ parentStopId });
-		return Array.from(directions.values()).filter((dir) => dir.parentStopId === parentStopId);
-	}
-
-	public async getPlatformDirectionsForRoute(routeId: number): Promise<StopDirectionMap> {
-		return this.getPlatformDirections({ routeId });
 	}
 
 	// Vehicles.
@@ -427,6 +361,10 @@ export class ZetManager {
 		this.stopsCachedAt = null;
 		this.shapesCachedAt = null;
 		this.newsCachedAt = null;
+		this.routesLoading = null;
+		this.stopsLoading = null;
+		this.shapesLoading = null;
+		this.newsLoading = null;
 	}
 
 	// Private.
